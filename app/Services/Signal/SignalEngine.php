@@ -25,6 +25,15 @@ class SignalEngine
         $orderImbalance = $features['microstructure']['orderbook']['imbalance'] ?? null;
         $volatility = $features['microstructure']['price']['volatility_24h'] ?? null;
         $liq = $features['liquidations']['sum_24h'] ?? null;
+        $longShortGlobal = data_get($features, 'long_short.global.net_ratio');
+        $longShortTop = data_get($features, 'long_short.top.net_ratio');
+        $longShortDiv = data_get($features, 'long_short.divergence');
+        $longShortStale = data_get($features, 'long_short.is_stale');
+        $momentumTrend = data_get($features, 'momentum.trend_score');
+        $momentumRegime = data_get($features, 'momentum.regime');
+        $momentum1d = data_get($features, 'momentum.momentum_1d_pct');
+        $momentum7d = data_get($features, 'momentum.momentum_7d_pct');
+        $rangeWidth = data_get($features, 'momentum.range.width_pct');
 
         $this->contribute(
             $fundingHeat !== null && $fundingHeat > 1.5,
@@ -269,8 +278,155 @@ class SignalEngine
             );
         }
 
+        $this->contribute(
+            $momentumTrend !== null && $momentumTrend > 1.2,
+            1.1,
+            'Momentum multi-timeframe bullish (score ' . $this->formatFloat($momentumTrend) . ')',
+            $score,
+            $reasons,
+            $factors,
+            ['trend_score' => $momentumTrend]
+        );
+
+        $this->contribute(
+            $momentumTrend !== null && $momentumTrend < -1.2,
+            -1.1,
+            'Momentum multi-timeframe bearish (score ' . $this->formatFloat($momentumTrend) . ')',
+            $score,
+            $reasons,
+            $factors,
+            ['trend_score' => $momentumTrend]
+        );
+
+        $this->contribute(
+            $momentum1d !== null && $momentum1d > 2.0,
+            0.6,
+            'Price impulse +2% dalam 24 jam',
+            $score,
+            $reasons,
+            $factors,
+            ['momentum_1d_pct' => $momentum1d]
+        );
+
+        $this->contribute(
+            $momentum1d !== null && $momentum1d < -2.0,
+            -0.6,
+            'Price dump -2% dalam 24 jam',
+            $score,
+            $reasons,
+            $factors,
+            ['momentum_1d_pct' => $momentum1d]
+        );
+
+        $this->contribute(
+            $momentum7d !== null && $momentum7d > 5,
+            0.4,
+            'Trend 7 hari masih naik',
+            $score,
+            $reasons,
+            $factors,
+            ['momentum_7d_pct' => $momentum7d]
+        );
+
+        $this->contribute(
+            $momentum7d !== null && $momentum7d < -5,
+            -0.4,
+            'Trend 7 hari turun tajam',
+            $score,
+            $reasons,
+            $factors,
+            ['momentum_7d_pct' => $momentum7d]
+        );
+
+        $this->contribute(
+            $longShortGlobal !== null && $longShortGlobal > 0.04,
+            0.7,
+            'Mayoritas akun global net long',
+            $score,
+            $reasons,
+            $factors,
+            ['net_ratio' => $longShortGlobal]
+        );
+
+        $this->contribute(
+            $longShortGlobal !== null && $longShortGlobal < -0.04,
+            -0.7,
+            'Mayoritas akun global net short',
+            $score,
+            $reasons,
+            $factors,
+            ['net_ratio' => $longShortGlobal]
+        );
+
+        $this->contribute(
+            $longShortTop !== null && $longShortTop > 0.06,
+            0.9,
+            'Top trader agresif long',
+            $score,
+            $reasons,
+            $factors,
+            ['top_net_ratio' => $longShortTop]
+        );
+
+        $this->contribute(
+            $longShortTop !== null && $longShortTop < -0.06,
+            -0.9,
+            'Top trader agresif short',
+            $score,
+            $reasons,
+            $factors,
+            ['top_net_ratio' => $longShortTop]
+        );
+
+        $this->contribute(
+            $longShortDiv !== null && $longShortDiv > 0.05,
+            0.5,
+            'Divergensi smart money long',
+            $score,
+            $reasons,
+            $factors,
+            ['divergence' => $longShortDiv]
+        );
+
+        $this->contribute(
+            $longShortDiv !== null && $longShortDiv < -0.05,
+            -0.5,
+            'Divergensi smart money short',
+            $score,
+            $reasons,
+            $factors,
+            ['divergence' => $longShortDiv]
+        );
+
+        $this->contribute(
+            $rangeWidth !== null && $rangeWidth < 1.5,
+            -0.4,
+            'Range harga sempit, fakeout risk',
+            $score,
+            $reasons,
+            $factors,
+            ['range_width_pct' => $rangeWidth]
+        );
+
+        $this->contribute(
+            $rangeWidth !== null && $rangeWidth > 6 && $momentumTrend !== null && abs($momentumTrend) > 1,
+            0.3,
+            'Range luas mendukung breakout searah momentum',
+            $score,
+            $reasons,
+            $factors,
+            ['range_width_pct' => $rangeWidth, 'trend_score' => $momentumTrend]
+        );
+
         $signal = $this->determineSignal($score);
         $confidence = min(abs($score) / 5, 1);
+        $quality = $this->buildQualitySummary($score, $features, $volatility);
+        $meta = [
+            'regime' => $momentumRegime,
+            'regime_reason' => data_get($features, 'momentum.regime_reason'),
+            'long_short_bias' => data_get($features, 'long_short.bias.global'),
+            'top_trader_bias' => data_get($features, 'long_short.bias.top'),
+        ];
 
         return [
             'signal' => $signal,
@@ -278,6 +434,8 @@ class SignalEngine
             'confidence' => round($confidence, 3),
             'reasons' => $reasons,
             'factors' => $factors,
+            'quality' => $quality,
+            'meta' => $meta,
         ];
     }
 
@@ -319,5 +477,61 @@ class SignalEngine
     protected function formatFloat(?float $value): string
     {
         return $value === null ? 'n/a' : number_format($value, 2);
+    }
+
+    protected function buildQualitySummary(float $score, array $features, ?float $volatility): array
+    {
+        $qualityScore = (float) (data_get($features, 'health.completeness') ?? 0.6);
+        $flags = [];
+
+        if (data_get($features, 'health.is_degraded')) {
+            $qualityScore -= 0.2;
+            $flags[] = [
+                'code' => 'data_gaps',
+                'label' => 'Data inti belum lengkap',
+                'severity' => 'danger',
+            ];
+        }
+
+        if (data_get($features, 'long_short.is_stale')) {
+            $qualityScore -= 0.1;
+            $flags[] = [
+                'code' => 'longshort_stale',
+                'label' => 'Long/short ratio >6 jam',
+                'severity' => 'warning',
+            ];
+        }
+
+        if ($volatility !== null && $volatility > 6 && abs($score) < 1.5) {
+            $qualityScore -= 0.1;
+            $flags[] = [
+                'code' => 'volatility_chop',
+                'label' => 'Volatilitas tinggi vs edge rendah',
+                'severity' => 'warning',
+            ];
+        }
+
+        if (data_get($features, 'momentum.regime') === 'HIGH VOL CHOP') {
+            $qualityScore -= 0.05;
+            $flags[] = [
+                'code' => 'regime_chop',
+                'label' => 'Regime chop terdeteksi',
+                'severity' => 'info',
+            ];
+        }
+
+        $qualityScore = max(0.1, min(1.0, $qualityScore));
+
+        $status = match (true) {
+            $qualityScore >= 0.8 => 'HIGH',
+            $qualityScore >= 0.55 => 'MEDIUM',
+            default => 'LOW',
+        };
+
+        return [
+            'score' => round($qualityScore, 2),
+            'status' => $status,
+            'flags' => $flags,
+        ];
     }
 }

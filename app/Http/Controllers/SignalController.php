@@ -28,7 +28,7 @@ class SignalController extends Controller
 
         $features = $this->featureBuilder->build($symbol, $pair, $interval);
         $signal = $this->signalEngine->score($features);
-        $ai = $this->aiSignalService->predict($features);
+        $ai = $this->aiSignalService->predict($features, $signal);
 
         return response()->json([
             'success' => true,
@@ -75,7 +75,10 @@ class SignalController extends Controller
             ->get();
 
         $history = $rows->map(function (SignalSnapshot $snapshot) {
-            $ai = $this->aiSignalService->predict($snapshot->features_payload ?? []);
+            $ai = $this->aiSignalService->predict(
+                $snapshot->features_payload ?? [],
+                ['score' => $snapshot->signal_score]
+            );
 
             return [
                 'generated_at' => optional($snapshot->generated_at)->toIso8601ZuluString(),
@@ -84,6 +87,7 @@ class SignalController extends Controller
                 'confidence' => $snapshot->signal_confidence,
                 'ai_probability' => $ai['probability'] ?? null,
                 'ai_decision' => $ai['decision'] ?? null,
+                'ai_confidence' => $ai['confidence'] ?? null,
                 'price_now' => $snapshot->price_now,
                 'price_future' => $snapshot->price_future,
                 'label_direction' => $snapshot->label_direction,

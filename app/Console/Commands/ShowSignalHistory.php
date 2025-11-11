@@ -47,7 +47,10 @@ class ShowSignalHistory extends Command
         }
 
         $table = $rows->map(function (SignalSnapshot $snapshot) {
-            $ai = $this->aiSignalService->predict($snapshot->features_payload ?? []);
+            $ai = $this->aiSignalService->predict(
+                $snapshot->features_payload ?? [],
+                ['score' => $snapshot->signal_score]
+            );
             $returnPct = ($snapshot->price_future && $snapshot->price_now)
                 ? (($snapshot->price_future - $snapshot->price_now) / $snapshot->price_now) * 100
                 : null;

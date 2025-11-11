@@ -5,6 +5,7 @@ namespace App\Repositories;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Centralized read-only access layer for all cg_* market data tables.
@@ -188,13 +189,37 @@ class MarketDataRepository
         ?int $upTo = null
     ): Collection {
         $table = $type === 'top' ? $this->longShortTopTable : $this->longShortGlobalTable;
+        $longColumn = $type === 'top' ? 'top_account_long_percent' : 'global_account_long_percent';
+        $shortColumn = $type === 'top' ? 'top_account_short_percent' : 'global_account_short_percent';
+        $ratioColumn = $type === 'top' ? 'top_account_long_short_ratio' : 'global_account_long_short_ratio';
+
+        $select = [
+            'interval',
+            'time',
+            DB::raw("{$longColumn} / 100 as long_account_ratio"),
+            DB::raw("{$shortColumn} / 100 as short_account_ratio"),
+            DB::raw("{$ratioColumn} as long_short_ratio"),
+        ];
+
+        $pairColumn = $this->tableHasColumn($table, 'pair') ? 'pair' : ($this->tableHasColumn($table, 'symbol') ? 'symbol' : null);
+        if ($pairColumn) {
+            $select[] = $pairColumn;
+        }
 
         $query = DB::table($table)
-            ->select('symbol', 'interval', 'time', 'long_account_ratio', 'short_account_ratio')
-            ->where('symbol', strtoupper($symbol))
+            ->select($select)
             ->where('interval', $interval)
             ->orderByDesc('time')
             ->limit($limit);
+
+        $pairSymbol = $this->normalizePairSymbol($symbol);
+        if ($pairColumn === 'symbol') {
+            $query->where('symbol', strtoupper($symbol));
+        } elseif ($pairColumn === 'pair') {
+            $query->where('pair', $pairSymbol);
+        } else {
+            $query->where('pair', $pairSymbol);
+        }
 
         if ($upTo) {
             $query->where('time', '<=', $upTo);
@@ -329,5 +354,32 @@ class MarketDataRepository
             $value <= 45 => 'Fear',
             default => 'Neutral',
         };
+    }
+
+    protected array $tableColumnCache = [];
+
+    protected function tableHasColumn(string $table, string $column): bool
+    {
+        if (!array_key_exists($table, $this->tableColumnCache)) {
+            $this->tableColumnCache[$table] = [];
+        }
+
+        if (!array_key_exists($column, $this->tableColumnCache[$table])) {
+            $this->tableColumnCache[$table][$column] = Schema::hasColumn($table, $column);
+        }
+
+        return $this->tableColumnCache[$table][$column];
+    }
+
+    protected function normalizePairSymbol(string $symbol): string
+    {
+        $upper = strtoupper($symbol);
+        foreach (['USDT', 'USDC', 'BUSD', 'USD'] as $quote) {
+            if (str_ends_with($upper, $quote)) {
+                return $upper;
+            }
+        }
+
+        return $upper . 'USDT';
     }
 }

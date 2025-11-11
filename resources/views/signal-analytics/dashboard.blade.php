@@ -37,6 +37,88 @@
     </div>
 
     <div class="row g-3">
+        <div class="col-xl-4 col-lg-6">
+            <div class="df-panel h-100 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="mb-0 text-uppercase text-muted small">Signal Quality</h5>
+                    <span class="badge" :class="qualityBadgeClass()" x-text="signal?.quality?.status ?? 'N/A'"></span>
+                </div>
+                <div class="display-6 fw-semibold mb-1" x-text="qualityScoreLabel()"></div>
+                <p class="text-muted small mb-3">Menggabungkan kelengkapan data, kondisi volatilitas, dan filter risiko.</p>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <template x-for="flag in (signal?.quality?.flags ?? [])" :key="flag.code">
+                        <span class="badge rounded-pill" :class="flagBadgeClass(flag.severity)" x-text="flag.label"></span>
+                    </template>
+                    <span class="text-muted small" x-show="!(signal?.quality?.flags?.length)">Tidak ada filter aktif</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-4 col-lg-6">
+            <div class="df-panel h-100 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="mb-0 text-uppercase text-muted small">Market Regime</h5>
+                    <span class="badge" :class="regimeBadgeClass()" x-text="signal?.meta?.regime ?? '--'"></span>
+                </div>
+                <div class="h3 fw-semibold mb-1" x-text="features?.momentum?.regime_reason ?? 'Menunggu data'"></div>
+                <div class="row mt-3 g-2">
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="small text-muted text-uppercase">Trend Score</div>
+                            <div class="fw-semibold" x-text="formatNumber(features?.momentum?.trend_score, 2)"></div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="small text-muted text-uppercase">Range Width</div>
+                            <div class="fw-semibold" x-text="formatPercent(features?.momentum?.range?.width_pct)"></div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="small text-muted text-uppercase">Mom 24h</div>
+                            <div class="fw-semibold" x-text="formatPercent(features?.momentum?.momentum_1d_pct)"></div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="small text-muted text-uppercase">Mom 7d</div>
+                            <div class="fw-semibold" x-text="formatPercent(features?.momentum?.momentum_7d_pct)"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-4">
+            <div class="df-panel h-100 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="mb-0 text-uppercase text-muted small">Long / Short Sentiment</h5>
+                    <span class="badge text-bg-warning-subtle text-warning" x-show="features?.long_short?.is_stale">Stale</span>
+                </div>
+                <div class="row small g-2 mb-2">
+                    <div class="col-6">
+                        <div class="border rounded p-2 h-100">
+                            <div class="text-muted text-uppercase">Global</div>
+                            <div class="fw-semibold" x-text="formatPercent(features?.long_short?.global?.net_ratio ? features.long_short.global.net_ratio * 100 : null, 1)"></div>
+                            <div class="text-muted" x-text="signal?.meta?.long_short_bias ?? '--'"></div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2 h-100">
+                            <div class="text-muted text-uppercase">Top Traders</div>
+                            <div class="fw-semibold" x-text="formatPercent(features?.long_short?.top?.net_ratio ? features.long_short.top.net_ratio * 100 : null, 1)"></div>
+                            <div class="text-muted" x-text="signal?.meta?.top_trader_bias ?? '--'"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between small">
+                    <span class="text-muted">Divergensi</span>
+                    <span class="fw-semibold" x-text="formatPercent(features?.long_short?.divergence ? features.long_short.divergence * 100 : null, 2)"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
         <div class="col-lg-4">
             <div class="df-panel h-100 p-4">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -55,6 +137,7 @@
                     <dd class="col-7 fw-semibold">
                         <span x-text="ai ? formatPercent(ai.probability * 100) : '--'"></span>
                         <span class="badge ms-2" :class="aiBadgeClass()" x-text="ai?.decision ?? 'N/A'"></span>
+                        <div class="text-muted small">Edge <span x-text="ai ? formatPercent(ai.confidence * 100) : '--'"></span></div>
                     </dd>
                 </dl>
                 <div class="mt-3">
@@ -113,28 +196,42 @@
             <p class="text-muted mb-0">Menunggu data backtest...</p>
         </template>
         <div class="row g-3" x-show="backtest">
-            <div class="col-md-3">
+            <div class="col-md-4 col-lg-3 col-xl-2">
                 <div class="border rounded p-3 h-100">
                     <div class="small text-muted text-uppercase">Win Rate</div>
-                    <div class="h3 mb-0" x-text="formatPercent(backtest?.metrics?.win_rate ? backtest.metrics.win_rate * 100 : null)"></div>
+                    <div class="h4 mb-0" x-text="formatPercent(backtest?.metrics?.win_rate ? backtest.metrics.win_rate * 100 : null)"></div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4 col-lg-3 col-xl-2">
                 <div class="border rounded p-3 h-100">
-                    <div class="small text-muted text-uppercase">Trades (Buy/Sell)</div>
+                    <div class="small text-muted text-uppercase">Profit Factor</div>
+                    <div class="h4 mb-0" x-text="formatNumber(backtest?.metrics?.profit_factor, 2)"></div>
+                </div>
+            </div>
+            <div class="col-md-4 col-lg-3 col-xl-2">
+                <div class="border rounded p-3 h-100">
+                    <div class="small text-muted text-uppercase">Trades (B/S)</div>
                     <div class="h5 mb-0" x-text="`${backtest?.metrics?.buy_trades ?? 0} / ${backtest?.metrics?.sell_trades ?? 0}`"></div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4 col-lg-3 col-xl-2">
                 <div class="border rounded p-3 h-100">
-                    <div class="small text-muted text-uppercase">Avg Return</div>
-                    <div class="h5 mb-0" x-text="formatPercent(backtest?.metrics?.avg_return_all_pct)"></div>
+                    <div class="small text-muted text-uppercase">AI Alignment</div>
+                    <div class="h4 mb-0" x-text="formatPercent(backtest?.metrics?.ai_alignment_rate ? backtest.metrics.ai_alignment_rate * 100 : null)"></div>
+                    <div class="text-muted small">AI & rule searah</div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4 col-lg-3 col-xl-2">
                 <div class="border rounded p-3 h-100">
-                    <div class="small text-muted text-uppercase">Max Drawdown</div>
-                    <div class="h5 mb-0" x-text="formatPercent(backtest?.metrics?.max_drawdown_pct, 2, true)"></div>
+                    <div class="small text-muted text-uppercase">Filtered Win Rate</div>
+                    <div class="h4 mb-0" x-text="formatPercent(backtest?.metrics?.filtered_win_rate ? backtest.metrics.filtered_win_rate * 100 : null)"></div>
+                    <div class="text-muted small" x-text="`${backtest?.metrics?.ai_filtered_trades ?? 0} trades`"></div>
+                </div>
+            </div>
+            <div class="col-md-4 col-lg-3 col-xl-2">
+                <div class="border rounded p-3 h-100">
+                    <div class="small text-muted text-uppercase">Avg / Max DD</div>
+                    <div class="h5 mb-0" x-text="`${formatPercent(backtest?.metrics?.avg_return_all_pct)} / ${formatPercent(backtest?.metrics?.max_drawdown_pct, 2, true)}`"></div>
                 </div>
             </div>
         </div>
@@ -147,6 +244,7 @@
                         <th>Return</th>
                         <th>Cumulative</th>
                         <th>Drawdown</th>
+                        <th>AI</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -159,6 +257,10 @@
                             <td x-text="formatPercent(entry.return_pct)"></td>
                             <td x-text="formatPercent(entry.cumulative)"></td>
                             <td x-text="formatPercent(entry.drawdown, 2, true)"></td>
+                            <td>
+                                <span class="badge me-1" :class="entry.ai_decision === 'BUY' ? 'text-bg-success' : (entry.ai_decision === 'SELL' ? 'text-bg-danger' : 'text-bg-secondary')" x-text="entry.ai_decision ?? 'N/A'"></span>
+                                <span class="text-muted small" x-text="entry.ai_probability ? formatPercent(entry.ai_probability * 100) : '--'"></span>
+                            </td>
                         </tr>
                     </template>
                 </tbody>
@@ -219,6 +321,16 @@
                         <td>Sentiment (Fear & Greed)</td>
                         <td x-text="features?.sentiment?.value ?? '--'"></td>
                         <td x-text="sentimentInterpretation()"></td>
+                    </tr>
+                    <tr>
+                        <td>Long/Short Divergence</td>
+                        <td x-text="formatPercent(features?.long_short?.divergence ? features.long_short.divergence * 100 : null, 2)"></td>
+                        <td x-text="longShortInterpretation()"></td>
+                    </tr>
+                    <tr>
+                        <td>Trend Score</td>
+                        <td x-text="formatNumber(features?.momentum?.trend_score, 2)"></td>
+                        <td x-text="regimeInterpretation()"></td>
                     </tr>
                     <tr>
                         <td>Microstructure (Taker Buy Ratio)</td>
@@ -292,6 +404,7 @@
                         <th>Rule Signal</th>
                         <th>Score</th>
                         <th>AI Prob.</th>
+                        <th>AI Edge</th>
                         <th>Outcome</th>
                         <th>Δ Price</th>
                     </tr>
@@ -308,6 +421,7 @@
                                 <span x-text="row.ai_probability !== null ? formatPercent(row.ai_probability * 100) : '--'"></span>
                                 <span class="badge ms-1" :class="row.ai_decision === 'BUY' ? 'text-bg-success' : (row.ai_decision === 'SELL' ? 'text-bg-danger' : 'text-bg-warning')" x-text="row.ai_decision ?? ''"></span>
                             </td>
+                            <td x-text="row.ai_confidence !== null ? formatPercent(row.ai_confidence * 100) : '--'"></td>
                             <td>
                                 <span class="badge" :class="row.label_direction === 'UP' ? 'text-bg-success' : (row.label_direction === 'DOWN' ? 'text-bg-danger' : 'text-bg-secondary')" x-text="row.label_direction ?? 'PENDING'"></span>
                             </td>
@@ -410,6 +524,33 @@ document.addEventListener('alpine:init', () => {
             if (this.ai.decision === 'SELL') return 'text-bg-danger';
             return 'text-bg-warning';
         },
+        qualityBadgeClass() {
+            const status = this.signal?.quality?.status;
+            if (status === 'HIGH') return 'text-bg-success';
+            if (status === 'MEDIUM') return 'text-bg-warning';
+            if (status === 'LOW') return 'text-bg-danger';
+            return 'text-bg-secondary';
+        },
+        regimeBadgeClass() {
+            const regime = this.signal?.meta?.regime;
+            if (regime === 'BULL TREND') return 'text-bg-success';
+            if (regime === 'BEAR TREND') return 'text-bg-danger';
+            if (regime === 'HIGH VOL CHOP') return 'text-bg-warning';
+            return 'text-bg-secondary';
+        },
+        flagBadgeClass(severity) {
+            if (severity === 'danger') return 'text-bg-danger';
+            if (severity === 'warning') return 'text-bg-warning';
+            if (severity === 'info') return 'text-bg-info';
+            return 'text-bg-secondary';
+        },
+        qualityScoreLabel() {
+            const score = this.signal?.quality?.score;
+            if (score === null || score === undefined) {
+                return '--';
+            }
+            return this.formatPercent(score * 100);
+        },
         get factorCards() {
             return [
                 {
@@ -453,6 +594,20 @@ document.addEventListener('alpine:init', () => {
                     value: () => this.formatPercent(this.features?.microstructure?.taker_flow?.buy_ratio ? this.features.microstructure.taker_flow.buy_ratio * 100 : null, 1),
                     subtitle: () => this.microInterpretation(),
                     variant: 'bg-light-subtle'
+                },
+                {
+                    key: 'longshort',
+                    title: 'Long/Short Bias',
+                    value: () => this.formatPercent(this.features?.long_short?.global?.net_ratio ? this.features.long_short.global.net_ratio * 100 : null, 1),
+                    subtitle: () => this.longShortInterpretation(),
+                    variant: 'bg-danger-subtle'
+                },
+                {
+                    key: 'regime',
+                    title: 'Regime State',
+                    value: () => this.signal?.meta?.regime ?? '--',
+                    subtitle: () => this.features?.momentum?.regime_reason ?? 'Menunggu data',
+                    variant: 'bg-dark text-white'
                 },
             ];
         },
@@ -539,6 +694,27 @@ document.addEventListener('alpine:init', () => {
             if (vol > 5) return 'Vol tinggi / regime agresif';
             if (vol < 1.5) return 'Vol rendah / market tenang';
             return 'Vol moderat';
+        },
+        longShortInterpretation() {
+            const bias = this.signal?.meta?.long_short_bias;
+            const divergence = this.features?.long_short?.divergence;
+            if (!bias && (divergence === null || divergence === undefined)) {
+                return 'Data belum tersedia';
+            }
+            if (bias === 'LONG HEAVY') {
+                return 'Retail condong long';
+            }
+            if (bias === 'SHORT HEAVY') {
+                return 'Retail condong short';
+            }
+            if (divergence !== null) {
+                if (divergence > 0.05) return 'Top trader lebih agresif long';
+                if (divergence < -0.05) return 'Top trader menekan short';
+            }
+            return 'Balanced';
+        },
+        regimeInterpretation() {
+            return this.features?.momentum?.regime_reason ?? 'Data belum tersedia';
         },
         formatNumber(value, decimals = 2) {
             if (value === null || value === undefined) return '--';

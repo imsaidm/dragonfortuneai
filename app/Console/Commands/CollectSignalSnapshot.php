@@ -87,7 +87,17 @@ class CollectSignalSnapshot extends Command
 
     protected function hasMissingSections(array $features): bool
     {
-        $keys = ['funding', 'open_interest', 'whales', 'etf', 'sentiment', 'microstructure'];
+        $keys = [
+            'funding',
+            'open_interest',
+            'whales',
+            'etf',
+            'sentiment',
+            'microstructure',
+            'liquidations',
+            'long_short',
+            'momentum',
+        ];
         foreach ($keys as $key) {
             if (empty($features[$key])) {
                 return true;

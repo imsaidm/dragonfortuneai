@@ -29,6 +29,21 @@ class FeatureBuilder
         $sentiment = $this->buildSentimentFeatures($timestampMs);
         $micro = $this->buildMicrostructureFeatures($symbol, $pair, $interval, $timestampMs);
         $liquidations = $this->buildLiquidationFeatures($symbol, $interval, $timestampMs);
+        $longShort = $this->buildLongShortFeatures($symbol, $interval, $timestampMs);
+        $momentum = $this->buildMomentumFeatures($pair, $interval, $timestampMs);
+
+        $sections = [
+            'funding' => $funding,
+            'open_interest' => $openInterest,
+            'whales' => $whale,
+            'etf' => $etf,
+            'sentiment' => $sentiment,
+            'microstructure' => $micro,
+            'liquidations' => $liquidations,
+            'long_short' => $longShort,
+            'momentum' => $momentum,
+        ];
+        $health = $this->buildHealthSnapshot($sections);
 
         return [
             'symbol' => strtoupper($symbol),
@@ -42,6 +57,9 @@ class FeatureBuilder
             'sentiment' => $sentiment,
             'microstructure' => $micro,
             'liquidations' => $liquidations,
+            'long_short' => $longShort,
+            'momentum' => $momentum,
+            'health' => $health,
         ];
     }
 
@@ -285,6 +303,280 @@ class FeatureBuilder
                 'longs' => $longTotal,
                 'shorts' => $shortTotal,
             ],
+        ];
+    }
+
+    protected function buildLongShortFeatures(string $symbol, string $interval, ?int $timestampMs = null): array
+    {
+        $global = $this->marketData->latestLongShortRatio($symbol, $interval, 'global', 240, $timestampMs);
+        $top = $this->marketData->latestLongShortRatio($symbol, $interval, 'top', 240, $timestampMs);
+
+        if ($global->isEmpty() && $top->isEmpty()) {
+            return [];
+        }
+
+        $lookback = $this->lookbackFromInterval($interval);
+        $globalSnapshot = $this->longShortSnapshot($global, $lookback);
+        $topSnapshot = $this->longShortSnapshot($top, $lookback);
+
+        $divergence = null;
+        if ($globalSnapshot && $topSnapshot && $globalSnapshot['net_ratio'] !== null && $topSnapshot['net_ratio'] !== null) {
+            $divergence = $topSnapshot['net_ratio'] - $globalSnapshot['net_ratio'];
+        }
+
+        $latestTimestamp = collect([
+            $globalSnapshot['timestamp_ms'] ?? null,
+            $topSnapshot['timestamp_ms'] ?? null,
+        ])->filter()->max();
+
+        $staleThreshold = 6 * 60 * 60 * 1000; // 6 jam
+        $isStale = $latestTimestamp
+            ? ($timestampMs - $latestTimestamp) > $staleThreshold
+            : true;
+
+        return [
+            'global' => $this->presentLongShortSnapshot($globalSnapshot),
+            'top' => $this->presentLongShortSnapshot($topSnapshot),
+            'divergence' => $divergence,
+            'bias' => [
+                'global' => $this->biasLabel($globalSnapshot['net_ratio'] ?? null),
+                'top' => $this->biasLabel($topSnapshot['net_ratio'] ?? null),
+            ],
+            'is_stale' => $isStale,
+            'updated_at' => $latestTimestamp
+                ? Carbon::createFromTimestampMs($latestTimestamp)->toIso8601ZuluString()
+                : null,
+        ];
+    }
+
+    protected function buildMomentumFeatures(string $pair, string $interval, ?int $timestampMs = null): array
+    {
+        $series = $this->marketData->latestSpotPrices($pair, '1h', 500, $timestampMs);
+
+        if ($series->isEmpty()) {
+            return [];
+        }
+
+        $moments = [
+            'momentum_1h_pct' => $this->percentChangeFromIndex($series, 1),
+            'momentum_4h_pct' => $this->percentChangeFromIndex($series, 4),
+            'momentum_1d_pct' => $this->percentChangeFromIndex($series, 24),
+            'momentum_7d_pct' => $this->percentChangeFromIndex($series, 24 * 7),
+        ];
+
+        $trendScore = $this->compositeTrendScore($moments);
+        $volatility = $this->computeVolatility($series);
+        $regime = $this->classifyRegime($trendScore, $volatility);
+        $range = $this->spotRangeLevels($series, 48);
+
+        return array_merge($moments, [
+            'trend_score' => $trendScore,
+            'volatility' => $volatility,
+            'regime' => $regime['label'],
+            'regime_reason' => $regime['reason'],
+            'range' => $range,
+        ]);
+    }
+
+    protected function compositeTrendScore(array $components): ?float
+    {
+        $weights = [
+            'momentum_1h_pct' => 0.1,
+            'momentum_4h_pct' => 0.2,
+            'momentum_1d_pct' => 0.45,
+            'momentum_7d_pct' => 0.25,
+        ];
+
+        $score = 0.0;
+        $weightSum = 0.0;
+        foreach ($weights as $key => $weight) {
+            $value = $components[$key] ?? null;
+            if ($value === null) {
+                continue;
+            }
+            $score += $value * $weight;
+            $weightSum += $weight;
+        }
+
+        return $weightSum > 0 ? $score / $weightSum : null;
+    }
+
+    protected function classifyRegime(?float $score, ?float $volatility): array
+    {
+        if ($score === null && $volatility === null) {
+            return [
+                'label' => 'UNKNOWN',
+                'reason' => 'Momentum & volatility belum lengkap',
+            ];
+        }
+
+        if ($score !== null && $score >= 1.5) {
+            return [
+                'label' => 'BULL TREND',
+                'reason' => 'Momentum multi-timeframe mengarah naik',
+            ];
+        }
+
+        if ($score !== null && $score <= -1.5) {
+            return [
+                'label' => 'BEAR TREND',
+                'reason' => 'Momentum multi-timeframe melemah',
+            ];
+        }
+
+        if ($volatility !== null && $volatility > 5 && abs($score ?? 0) < 1.0) {
+            return [
+                'label' => 'HIGH VOL CHOP',
+                'reason' => 'Volatilitas tinggi tanpa arah jelas',
+            ];
+        }
+
+        return [
+            'label' => 'RANGE',
+            'reason' => 'Momentum netral',
+        ];
+    }
+
+    protected function spotRangeLevels(Collection $series, int $bars = 48): array
+    {
+        $subset = $series->take($bars);
+
+        if ($subset->isEmpty()) {
+            return [];
+        }
+
+        $high = $subset->max(fn ($row) => $this->toFloat($row->high ?? $row->close));
+        $low = $subset->min(fn ($row) => $this->toFloat($row->low ?? $row->close));
+
+        if ($high === null && $low === null) {
+            return [];
+        }
+
+        $width = ($high !== null && $low !== null && $low != 0.0)
+            ? (($high - $low) / $low) * 100
+            : null;
+
+        return [
+            'high' => $high,
+            'low' => $low,
+            'width_pct' => $width,
+        ];
+    }
+
+    protected function longShortSnapshot(Collection $rows, int $lookback): ?array
+    {
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        $ordered = $rows->sortByDesc('time')->values();
+        $latest = $ordered->first();
+
+        $long = $this->toFloat($latest->long_account_ratio);
+        $short = $this->toFloat($latest->short_account_ratio);
+        $net = ($long !== null && $short !== null) ? $long - $short : null;
+
+        $reference = $ordered->get(min($lookback, max($ordered->count() - 1, 0)));
+        $change = null;
+        if ($net !== null && $reference) {
+            $prevLong = $this->toFloat($reference->long_account_ratio);
+            $prevShort = $this->toFloat($reference->short_account_ratio);
+            $prevNet = ($prevLong !== null && $prevShort !== null) ? $prevLong - $prevShort : null;
+            if ($prevNet !== null && $prevNet != 0.0) {
+                $change = (($net - $prevNet) / abs($prevNet)) * 100;
+            }
+        }
+
+        return [
+            'long_ratio' => $long,
+            'short_ratio' => $short,
+            'net_ratio' => $net,
+            'change_24h_pct' => $change,
+            'timestamp_ms' => $this->normalizeTimestamp($latest->time ?? null),
+        ];
+    }
+
+    protected function presentLongShortSnapshot(?array $snapshot): ?array
+    {
+        if (!$snapshot) {
+            return null;
+        }
+
+        return [
+            'long_ratio' => $snapshot['long_ratio'],
+            'short_ratio' => $snapshot['short_ratio'],
+            'net_ratio' => $snapshot['net_ratio'],
+            'change_24h_pct' => $snapshot['change_24h_pct'],
+            'updated_at' => $snapshot['timestamp_ms']
+                ? Carbon::createFromTimestampMs($snapshot['timestamp_ms'])->toIso8601ZuluString()
+                : null,
+        ];
+    }
+
+    protected function biasLabel(?float $net): ?string
+    {
+        if ($net === null) {
+            return null;
+        }
+
+        if ($net > 0.03) {
+            return 'LONG HEAVY';
+        }
+
+        if ($net < -0.03) {
+            return 'SHORT HEAVY';
+        }
+
+        return 'BALANCED';
+    }
+
+    protected function lookbackFromInterval(string $interval): int
+    {
+        return match ($interval) {
+            '4h' => 6,
+            '1d' => 1,
+            default => 24,
+        };
+    }
+
+    protected function normalizeTimestamp(mixed $value): ?int
+    {
+        if ($value === null || !is_numeric($value)) {
+            return null;
+        }
+
+        $numeric = (int) $value;
+        if ($numeric < 1_000_000_000_000) {
+            return $numeric * 1000;
+        }
+
+        return $numeric;
+    }
+
+    protected function buildHealthSnapshot(array $sections): array
+    {
+        $total = count($sections);
+        if ($total === 0) {
+            return [
+                'completeness' => 0.0,
+                'missing_sections' => [],
+                'is_degraded' => true,
+            ];
+        }
+
+        $missing = [];
+        foreach ($sections as $key => $value) {
+            if (empty($value)) {
+                $missing[] = $key;
+            }
+        }
+
+        $completeness = 1 - (count($missing) / $total);
+
+        return [
+            'completeness' => round($completeness, 2),
+            'missing_sections' => $missing,
+            'is_degraded' => $completeness < 0.7,
         ];
     }
 

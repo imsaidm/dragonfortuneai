@@ -51,6 +51,14 @@ class RunSignalBacktest extends Command
             ['Avg Return ALL', $this->formatPercent($metrics['avg_return_all_pct'])],
             ['Expectancy', $this->formatPercent($metrics['expectancy_pct'])],
             ['Max Drawdown', $this->formatPercent($metrics['max_drawdown_pct'])],
+            ['Profit Factor', number_format($metrics['profit_factor'], 2)],
+            ['Median Return', $this->formatPercent($metrics['median_return_pct'])],
+            ['Best Trade', $this->formatPercent($metrics['best_trade_pct'])],
+            ['Worst Trade', $this->formatPercent($metrics['worst_trade_pct'])],
+            ['AI Alignment Rate', $this->formatRatio($metrics['ai_alignment_rate'])],
+            ['Filtered Trades (AI+Rule)', $metrics['ai_filtered_trades']],
+            ['Filtered Win Rate', $this->formatRatio($metrics['filtered_win_rate'])],
+            ['Filtered Avg Return', $this->formatPercent($metrics['filtered_avg_return_pct'])],
         ];
 
         $this->table(['Metric', 'Value'], $rows);
